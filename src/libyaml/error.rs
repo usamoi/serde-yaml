@@ -1,59 +1,53 @@
-use crate::libyaml::cstr::CStr;
-use std::fmt::{self, Debug, Display};
-use std::mem::MaybeUninit;
-use std::ptr::NonNull;
+use std::ffi::CStr;
 use unsafe_libyaml as sys;
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
-
-pub(crate) struct Error {
+pub struct Error {
     kind: sys::yaml_error_type_t,
-    problem: CStr<'static>,
+    problem: Option<&'static CStr>,
     problem_offset: u64,
     problem_mark: Mark,
-    context: Option<CStr<'static>>,
+    context: Option<&'static CStr>,
     context_mark: Mark,
 }
 
 impl Error {
-    pub unsafe fn parse_error(parser: *const sys::yaml_parser_t) -> Self {
+    pub unsafe fn get_parser_error(parser: *const sys::yaml_parser_t) -> Self {
+        let parser = unsafe { &(*parser) };
         Error {
-            kind: unsafe { (*parser).error },
-            problem: match NonNull::new(unsafe { (*parser).problem as *mut _ }) {
-                Some(problem) => unsafe { CStr::from_ptr(problem) },
-                None => CStr::from_bytes_with_nul(b"libyaml parser failed but there is no error\0"),
+            kind: parser.error,
+            problem: if !parser.problem.is_null() {
+                Some(unsafe { CStr::from_ptr(parser.problem) })
+            } else {
+                None
             },
-            problem_offset: unsafe { (*parser).problem_offset },
+            problem_offset: parser.problem_offset,
             problem_mark: Mark {
-                sys: unsafe { (*parser).problem_mark },
+                sys: parser.problem_mark,
             },
-            context: match NonNull::new(unsafe { (*parser).context as *mut _ }) {
-                Some(context) => Some(unsafe { CStr::from_ptr(context) }),
-                None => None,
+            context: if !parser.context.is_null() {
+                Some(unsafe { CStr::from_ptr(parser.context) })
+            } else {
+                None
             },
             context_mark: Mark {
-                sys: unsafe { (*parser).context_mark },
+                sys: parser.context_mark,
             },
         }
     }
 
-    pub unsafe fn emit_error(emitter: *const sys::yaml_emitter_t) -> Self {
+    pub unsafe fn get_emitter_error(emitter: *const sys::yaml_emitter_t) -> Self {
+        let emitter = unsafe { &(*emitter) };
         Error {
-            kind: unsafe { (*emitter).error },
-            problem: match NonNull::new(unsafe { (*emitter).problem as *mut _ }) {
-                Some(problem) => unsafe { CStr::from_ptr(problem) },
-                None => {
-                    CStr::from_bytes_with_nul(b"libyaml emitter failed but there is no error\0")
-                }
+            kind: emitter.error,
+            problem: if !emitter.problem.is_null() {
+                Some(unsafe { CStr::from_ptr(emitter.problem) })
+            } else {
+                None
             },
             problem_offset: 0,
-            problem_mark: Mark {
-                sys: unsafe { MaybeUninit::<sys::yaml_mark_t>::zeroed().assume_init() },
-            },
+            problem_mark: Default::default(),
             context: None,
-            context_mark: Mark {
-                sys: unsafe { MaybeUninit::<sys::yaml_mark_t>::zeroed().assume_init() },
-            },
+            context_mark: Default::default(),
         }
     }
 
@@ -62,16 +56,20 @@ impl Error {
     }
 }
 
-impl Display for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{}", self.problem)?;
+impl std::fmt::Display for Error {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Some(problem) = self.problem {
+            write!(formatter, "{}", problem.to_string_lossy())?;
+        } else {
+            write!(formatter, "libyaml parser failed but there is no error")?;
+        }
         if self.problem_mark.sys.line != 0 || self.problem_mark.sys.column != 0 {
             write!(formatter, " at {}", self.problem_mark)?;
         } else if self.problem_offset != 0 {
             write!(formatter, " at position {}", self.problem_offset)?;
         }
         if let Some(context) = &self.context {
-            write!(formatter, ", {}", context)?;
+            write!(formatter, ", {}", context.to_string_lossy())?;
             if (self.context_mark.sys.line != 0 || self.context_mark.sys.column != 0)
                 && (self.context_mark.sys.line != self.problem_mark.sys.line
                     || self.context_mark.sys.column != self.problem_mark.sys.column)
@@ -83,8 +81,8 @@ impl Display for Error {
     }
 }
 
-impl Debug for Error {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Error {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut formatter = formatter.debug_struct("Error");
         if let Some(kind) = match self.kind {
             sys::YAML_MEMORY_ERROR => Some("MEMORY"),
@@ -115,7 +113,7 @@ impl Debug for Error {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct Mark {
+pub struct Mark {
     pub(super) sys: sys::yaml_mark_t,
 }
 
@@ -133,8 +131,16 @@ impl Mark {
     }
 }
 
-impl Display for Mark {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl Default for Mark {
+    fn default() -> Self {
+        Self {
+            sys: unsafe { std::mem::zeroed() },
+        }
+    }
+}
+
+impl std::fmt::Display for Mark {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         if self.sys.line != 0 || self.sys.column != 0 {
             write!(
                 formatter,
@@ -148,8 +154,8 @@ impl Display for Mark {
     }
 }
 
-impl Debug for Mark {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Mark {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut formatter = formatter.debug_struct("Mark");
         if self.sys.line != 0 || self.sys.column != 0 {
             formatter.field("line", &(self.sys.line + 1));

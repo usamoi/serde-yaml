@@ -158,6 +158,7 @@
     // noisy
     clippy::missing_errors_doc,
     clippy::must_use_candidate,
+    clippy::needless_lifetimes,
 )]
 
 pub use crate::de::{from_reader, from_slice, from_str, Deserializer};

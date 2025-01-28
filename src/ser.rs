@@ -10,7 +10,6 @@ use serde::de::Visitor;
 use serde::ser::{self, Serializer as _};
 use std::fmt::{self, Display};
 use std::io;
-use std::marker::PhantomData;
 use std::mem;
 use std::num;
 use std::str;
@@ -44,8 +43,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct Serializer<W> {
     depth: usize,
     state: State,
-    emitter: Emitter<'static>,
-    writer: PhantomData<W>,
+    emitter: Emitter<W>,
 }
 
 enum State {
@@ -62,16 +60,12 @@ where
 {
     /// Creates a new YAML serializer.
     pub fn new(writer: W) -> Self {
-        let mut emitter = Emitter::new({
-            let writer = Box::new(writer);
-            unsafe { mem::transmute::<Box<dyn io::Write>, Box<dyn io::Write>>(writer) }
-        });
+        let mut emitter = Emitter::new(writer);
         emitter.emit(Event::StreamStart).unwrap();
         Serializer {
             depth: 0,
             state: State::NothingInParticular,
             emitter,
-            writer: PhantomData,
         }
     }
 
@@ -86,8 +80,7 @@ where
     pub fn into_inner(mut self) -> Result<W> {
         self.emitter.emit(Event::StreamEnd)?;
         self.emitter.flush()?;
-        let writer = self.emitter.into_inner();
-        Ok(*unsafe { Box::from_raw(Box::into_raw(writer).cast::<W>()) })
+        Ok(self.emitter.into_inner())
     }
 
     fn emit_scalar(&mut self, mut scalar: Scalar) -> Result<()> {

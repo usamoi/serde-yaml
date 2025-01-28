@@ -10,7 +10,7 @@ impl PartialEq<str> for Value {
     /// assert!(Value::String("lorem".into()) == *"lorem");
     /// ```
     fn eq(&self, other: &str) -> bool {
-        self.as_str().map_or(false, |s| s == other)
+        self.as_str() == Some(other)
     }
 }
 
@@ -24,7 +24,7 @@ impl<'a> PartialEq<&'a str> for Value {
     /// assert!(Value::String("lorem".into()) == "lorem");
     /// ```
     fn eq(&self, other: &&str) -> bool {
-        self.as_str().map_or(false, |s| s == *other)
+        self.as_str() == Some(*other)
     }
 }
 
@@ -38,7 +38,7 @@ impl PartialEq<String> for Value {
     /// assert!(Value::String("lorem".into()) == "lorem".to_string());
     /// ```
     fn eq(&self, other: &String) -> bool {
-        self.as_str().map_or(false, |s| s == other)
+        self.as_str().is_some_and(|s| s == other)
     }
 }
 
@@ -52,7 +52,7 @@ impl PartialEq<bool> for Value {
     /// assert!(Value::Bool(true) == true);
     /// ```
     fn eq(&self, other: &bool) -> bool {
-        self.as_bool().map_or(false, |b| b == *other)
+        self.as_bool() == Some(*other)
     }
 }
 

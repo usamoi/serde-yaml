@@ -1,7 +1,6 @@
 use crate::error::{self, Error, ErrorImpl};
 use crate::libyaml::error::Mark;
-use crate::libyaml::parser::{MappingStart, Scalar, ScalarStyle, SequenceStart};
-use crate::libyaml::tag::Tag;
+use crate::libyaml::parser::{MappingStart, Scalar, ScalarStyle, SequenceStart, Tag};
 use crate::loader::{Document, Loader};
 use crate::path::Path;
 use serde::de::value::StrDeserializer;
@@ -703,7 +702,7 @@ impl<'de, 'document, 'map> de::MapAccess<'de> for MapAccess<'de, 'document, 'map
             Event::MappingEnd | Event::Void => Ok(None),
             Event::Scalar(scalar) => {
                 self.len += 1;
-                self.key = Some(&scalar.value);
+                self.key = Some(scalar.value.as_ref());
                 seed.deserialize(&mut *self.de).map(Some)
             }
             _ => {
@@ -859,37 +858,37 @@ fn visit_scalar<'de, V>(visitor: V, scalar: &Scalar<'de>, tagged_already: bool) 
 where
     V: Visitor<'de>,
 {
-    let v = match str::from_utf8(&scalar.value) {
+    let v = match str::from_utf8(scalar.value.as_ref()) {
         Ok(v) => v,
         Err(_) => {
             return Err(de::Error::invalid_type(
-                Unexpected::Bytes(&scalar.value),
+                Unexpected::Bytes(scalar.value.as_ref()),
                 &visitor,
             ))
         }
     };
     if let (Some(tag), false) = (&scalar.tag, tagged_already) {
-        if tag == Tag::BOOL {
+        if tag.as_ref() == Tag::BOOL {
             return match parse_bool(v) {
                 Some(v) => visitor.visit_bool(v),
                 None => Err(de::Error::invalid_value(Unexpected::Str(v), &"a boolean")),
             };
-        } else if tag == Tag::INT {
+        } else if tag.as_ref() == Tag::INT {
             return match visit_int(visitor, v) {
                 Ok(result) => result,
                 Err(_) => Err(de::Error::invalid_value(Unexpected::Str(v), &"an integer")),
             };
-        } else if tag == Tag::FLOAT {
+        } else if tag.as_ref() == Tag::FLOAT {
             return match parse_f64(v) {
                 Some(v) => visitor.visit_f64(v),
                 None => Err(de::Error::invalid_value(Unexpected::Str(v), &"a float")),
             };
-        } else if tag == Tag::NULL {
+        } else if tag.as_ref() == Tag::NULL {
             return match parse_null(v.as_bytes()) {
                 Some(()) => visitor.visit_unit(),
                 None => Err(de::Error::invalid_value(Unexpected::Str(v), &"null")),
             };
-        } else if tag.starts_with("!") && scalar.style == ScalarStyle::Plain {
+        } else if tag.as_ref().starts_with(b"!") && scalar.style == ScalarStyle::Plain {
             return visit_untagged_scalar(visitor, v, scalar.repr, scalar.style);
         }
     } else if scalar.style == ScalarStyle::Plain {
@@ -1147,13 +1146,13 @@ where
 }
 
 fn is_plain_or_tagged_literal_scalar(
-    expected: &str,
+    expected: &[u8],
     scalar: &Scalar,
     tagged_already: bool,
 ) -> bool {
     match (scalar.style, &scalar.tag, tagged_already) {
         (ScalarStyle::Plain, _, _) => true,
-        (ScalarStyle::Literal, Some(tag), false) => tag == expected,
+        (ScalarStyle::Literal, Some(tag), false) => tag.as_ref() == expected,
         _ => false,
     }
 }
@@ -1191,7 +1190,7 @@ fn invalid_type(event: &Event, exp: &dyn Expected) -> Error {
 }
 
 fn parse_tag(libyaml_tag: &Option<Tag>) -> Option<&str> {
-    let mut bytes: &[u8] = libyaml_tag.as_ref()?;
+    let mut bytes: &[u8] = libyaml_tag.as_ref()?.as_ref();
     if let (b'!', rest) = bytes.split_first()? {
         if !rest.is_empty() {
             bytes = rest;
@@ -1275,7 +1274,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::BOOL, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(boolean) = parse_bool(value) {
                             break visitor.visit_bool(boolean);
                         }
@@ -1321,7 +1320,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::INT, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(int) = parse_signed_int(value, i64::from_str_radix) {
                             break visitor.visit_i64(int);
                         }
@@ -1346,7 +1345,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::INT, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(int) = parse_signed_int(value, i128::from_str_radix) {
                             break visitor.visit_i128(int);
                         }
@@ -1392,7 +1391,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::INT, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(int) = parse_unsigned_int(value, u64::from_str_radix) {
                             break visitor.visit_u64(int);
                         }
@@ -1417,7 +1416,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::INT, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(int) = parse_unsigned_int(value, u128::from_str_radix) {
                             break visitor.visit_u128(int);
                         }
@@ -1449,7 +1448,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 Event::Scalar(scalar)
                     if is_plain_or_tagged_literal_scalar(Tag::FLOAT, scalar, tagged_already) =>
                 {
-                    if let Ok(value) = str::from_utf8(&scalar.value) {
+                    if let Ok(value) = str::from_utf8(scalar.value.as_ref()) {
                         if let Some(float) = parse_f64(value) {
                             break visitor.visit_f64(float);
                         }
@@ -1476,7 +1475,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
         let (next, mark) = self.next_event_mark()?;
         match next {
             Event::Scalar(scalar) => {
-                if let Ok(v) = str::from_utf8(&scalar.value) {
+                if let Ok(v) = str::from_utf8(scalar.value.as_ref()) {
                     if let Some(borrowed) = parse_borrowed_str(v, scalar.repr, scalar.style) {
                         visitor.visit_borrowed_str(borrowed)
                     } else {
@@ -1528,14 +1527,14 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 if scalar.style != ScalarStyle::Plain {
                     true
                 } else if let (Some(tag), false) = (&scalar.tag, tagged_already) {
-                    if tag == Tag::NULL {
-                        if let Some(()) = parse_null(&scalar.value) {
+                    if tag.as_ref() == Tag::NULL {
+                        if let Some(()) = parse_null(scalar.value.as_ref()) {
                             false
-                        } else if let Ok(v) = str::from_utf8(&scalar.value) {
+                        } else if let Ok(v) = str::from_utf8(scalar.value.as_ref()) {
                             return Err(de::Error::invalid_value(Unexpected::Str(v), &"null"));
                         } else {
                             return Err(de::Error::invalid_value(
-                                Unexpected::Bytes(&scalar.value),
+                                Unexpected::Bytes(scalar.value.as_ref()),
                                 &"null",
                             ));
                         }
@@ -1543,7 +1542,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                         true
                     }
                 } else {
-                    !scalar.value.is_empty() && parse_null(&scalar.value).is_none()
+                    !scalar.value.as_ref().is_empty() && parse_null(scalar.value.as_ref()).is_none()
                 }
             }
             Event::SequenceStart(_) | Event::MappingStart(_) => true,
@@ -1571,17 +1570,17 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 let is_null = if scalar.style != ScalarStyle::Plain {
                     false
                 } else if let (Some(tag), false) = (&scalar.tag, tagged_already) {
-                    tag == Tag::NULL && parse_null(&scalar.value).is_some()
+                    tag.as_ref() == Tag::NULL && parse_null(scalar.value.as_ref()).is_some()
                 } else {
-                    scalar.value.is_empty() || parse_null(&scalar.value).is_some()
+                    scalar.value.as_ref().is_empty() || parse_null(scalar.value.as_ref()).is_some()
                 };
                 if is_null {
                     visitor.visit_unit()
-                } else if let Ok(v) = str::from_utf8(&scalar.value) {
+                } else if let Ok(v) = str::from_utf8(scalar.value.as_ref()) {
                     Err(de::Error::invalid_value(Unexpected::Str(v), &"null"))
                 } else {
                     Err(de::Error::invalid_value(
-                        Unexpected::Bytes(&scalar.value),
+                        Unexpected::Bytes(scalar.value.as_ref()),
                         &"null",
                     ))
                 }
@@ -1621,7 +1620,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 if match other {
                     Event::Void => true,
                     Event::Scalar(scalar) => {
-                        scalar.value.is_empty() && scalar.style == ScalarStyle::Plain
+                        scalar.value.as_ref().is_empty() && scalar.style == ScalarStyle::Plain
                     }
                     _ => false,
                 } {
@@ -1669,7 +1668,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
                 if match other {
                     Event::Void => true,
                     Event::Scalar(scalar) => {
-                        scalar.value.is_empty() && scalar.style == ScalarStyle::Plain
+                        scalar.value.as_ref().is_empty() && scalar.style == ScalarStyle::Plain
                     }
                     _ => false,
                 } {
@@ -1715,7 +1714,7 @@ impl<'de, 'document> de::Deserializer<'de> for &mut DeserializerFromEvents<'de, 
         loop {
             if let Some(current_enum) = self.current_enum {
                 if let Event::Scalar(scalar) = next {
-                    if !scalar.value.is_empty() {
+                    if !scalar.value.as_ref().is_empty() {
                         break visitor.visit_enum(UnitVariantAccess { de: self });
                     }
                 }
